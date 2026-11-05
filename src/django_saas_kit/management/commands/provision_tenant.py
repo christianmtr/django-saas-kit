@@ -24,13 +24,13 @@ class Command(BaseCommand):
         parser.add_argument(
             "--name",
             type=str,
-            default="",
+            default=None,
             help="Commercial or display name for the tenant.",
         )
         parser.add_argument(
             "--domain",
             type=str,
-            default="",
+            default=None,
             help="Primary domain or subdomain for the tenant.",
         )
         parser.add_argument(
@@ -56,21 +56,36 @@ class Command(BaseCommand):
         except ValidationError as exc:
             raise CommandError("; ".join(exc.messages)) from exc
 
-        display_name = options["name"].strip() or schema_name
-        domain = options["domain"].strip()
-        is_active = not options["inactive"]
+        raw_name: str | None = options.get("name")
+        raw_domain: str | None = options.get("domain")
+        inactive_flag: bool = bool(options.get("inactive", False))
+
         public_db = saas_settings.PUBLIC_DB_ALIAS
         default_db = saas_settings.DEFAULT_DB_ALIAS
 
         TenantModel = get_tenant_model()
-        tenant, created = TenantModel.objects.using(public_db).update_or_create(
+        tenant, created = TenantModel.objects.using(public_db).get_or_create(
             schema_name=schema_name,
             defaults={
-                "name": display_name,
-                "domain": domain,
-                "is_active": is_active,
+                "name": (raw_name.strip() if raw_name and raw_name.strip() else schema_name),
+                "domain": (raw_domain.strip() if raw_domain else ""),
+                "is_active": not inactive_flag,
             },
         )
+
+        if not created:
+            update_fields: list[str] = []
+            if raw_name is not None and raw_name.strip():
+                tenant.name = raw_name.strip()
+                update_fields.append("name")
+            if raw_domain is not None:
+                tenant.domain = raw_domain.strip()
+                update_fields.append("domain")
+            if inactive_flag and tenant.is_active:
+                tenant.is_active = False
+                update_fields.append("is_active")
+            if update_fields:
+                tenant.save(using=public_db, update_fields=update_fields)
 
         create_schema(schema_name)
         action = "Created" if created else "Updated"

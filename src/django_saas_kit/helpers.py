@@ -7,6 +7,13 @@ from django_saas_kit.conf import saas_settings
 from django_saas_kit.validators import validate_schema_name
 
 
+def _append_search_path_option(existing_options: str, search_path_flag: str) -> str:
+    prefix = existing_options.strip()
+    if not prefix:
+        return search_path_flag
+    return f"{prefix} {search_path_flag}"
+
+
 def configure_saas_databases(
     base_config: dict[str, Any],
     tenant_schema: str | None = None,
@@ -21,12 +28,22 @@ def configure_saas_databases(
     default_options = dict(default_db.get("OPTIONS", {}))
     public_options = dict(public_db.get("OPTIONS", {}))
 
-    if active_schema == "public":
-        default_options["options"] = "-c search_path=public"
-    else:
-        default_options["options"] = f"-c search_path={active_schema},public"
+    existing_default_opt = str(default_options.get("options", ""))
+    existing_public_opt = str(public_options.get("options", ""))
 
-    public_options["options"] = "-c search_path=public"
+    if active_schema == "public":
+        default_flag = "-c search_path=public"
+    else:
+        default_flag = f"-c search_path={active_schema},public"
+
+    public_flag = "-c search_path=public"
+
+    default_options["options"] = _append_search_path_option(
+        existing_default_opt, default_flag
+    )
+    public_options["options"] = _append_search_path_option(
+        existing_public_opt, public_flag
+    )
 
     default_db["OPTIONS"] = default_options
     public_db["OPTIONS"] = public_options

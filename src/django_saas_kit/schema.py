@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from django.db import connections
+from django.db.migrations.recorder import MigrationRecorder
 
 from django_saas_kit.conf import saas_settings
 from django_saas_kit.routers import (
@@ -37,7 +38,28 @@ def schema_exists(schema_name: str, using: str | None = None) -> bool:
         return cursor.fetchone() is not None
 
 
-def _execute_set_search_path(conn_alias: str, schema_name: str) -> None:
+def list_schemas(using: str | None = None) -> list[str]:
+    """Return non-system, non-public PostgreSQL schemas from information_schema.schemata."""
+    db_alias = using or saas_settings.PUBLIC_DB_ALIAS
+    conn = connections[db_alias]
+    with conn.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT schema_name
+            FROM information_schema.schemata
+            WHERE schema_name NOT IN ('public', 'information_schema')
+              AND schema_name NOT LIKE 'pg_%%'
+            ORDER BY schema_name
+            """
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+
+def _execute_set_search_path(
+    conn_alias: str,
+    schema_name: str,
+    ensure_migration_table: bool = False,
+) -> None:
     validate_schema_name(schema_name)
     conn = connections[conn_alias]
     if conn.vendor != "postgresql":
@@ -47,6 +69,9 @@ def _execute_set_search_path(conn_alias: str, schema_name: str) -> None:
         if schema_name == "public":
             cursor.execute("SET search_path TO public")
         else:
+            if ensure_migration_table:
+                cursor.execute(f"SET search_path TO {quoted_schema}")
+                MigrationRecorder(conn).ensure_schema()
             cursor.execute(f"SET search_path TO {quoted_schema}, public")
 
 
@@ -65,9 +90,17 @@ def tenant_migration_context(
     previous_effective_schema = get_active_migration_schema()
 
     set_active_migration_schema(schema_name)
-    _execute_set_search_path(conn_alias, schema_name)
+    _execute_set_search_path(
+        conn_alias,
+        schema_name,
+        ensure_migration_table=(schema_name != "public"),
+    )
     try:
         yield
     finally:
         set_active_migration_schema(previous_override)
-        _execute_set_search_path(conn_alias, previous_effective_schema)
+        _execute_set_search_path(
+            conn_alias,
+            previous_effective_schema,
+            ensure_migration_table=False,
+        )

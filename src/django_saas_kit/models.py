@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from django.db import models
 
 from django_saas_kit.validators import validate_schema_name
@@ -39,6 +41,20 @@ class AbstractTenant(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.schema_name})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        super().save(*args, **kwargs)
+        from django_saas_kit.middleware import clear_tenant_status_cache
+
+        clear_tenant_status_cache(self.schema_name)
+
+    def delete(self, *args: Any, **kwargs: Any) -> tuple[int, dict[str, int]]:
+        schema_name = self.schema_name
+        result = super().delete(*args, **kwargs)
+        from django_saas_kit.middleware import clear_tenant_status_cache
+
+        clear_tenant_status_cache(schema_name)
+        return result
 
 
 class Tenant(AbstractTenant):

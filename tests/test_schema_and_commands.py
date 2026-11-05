@@ -13,7 +13,12 @@ from django_saas_kit.routers import (
     get_active_migration_schema,
     get_migration_schema_override,
 )
-from django_saas_kit.schema import create_schema, tenant_migration_context
+from django_saas_kit.schema import (
+    _execute_set_search_path,
+    create_schema,
+    list_schemas,
+    tenant_migration_context,
+)
 
 
 @pytest.mark.django_db(databases=["default", "public"])
@@ -65,6 +70,66 @@ def test_provision_tenant_creates_record_schema_and_runs_migrations():
 def test_provision_tenant_forbids_public_schema():
     with pytest.raises(CommandError, match="public"):
         call_command("provision_tenant", "public", name="Public")
+
+
+@pytest.mark.django_db(databases=["default", "public"])
+def test_provision_tenant_rerun_preserves_existing_metadata_when_flags_omitted():
+    Tenant.objects.using("public").create(
+        schema_name="tenant_acme",
+        name="Acme Original",
+        domain="acme.original.com",
+        is_active=False,
+    )
+    with patch(
+        "django_saas_kit.management.commands.provision_tenant.create_schema"
+    ), patch("django_saas_kit.schema._execute_set_search_path"), patch(
+        "django_saas_kit.management.commands.provision_tenant.call_command"
+    ):
+        call_command("provision_tenant", "tenant_acme", no_migrate=True)
+
+    tenant = Tenant.objects.using("public").get(schema_name="tenant_acme")
+    assert tenant.name == "Acme Original"
+    assert tenant.domain == "acme.original.com"
+    assert tenant.is_active is False
+
+
+@pytest.mark.django_db(databases=["default", "public"])
+def test_execute_set_search_path_ensures_isolated_migration_table_on_postgres():
+    executed_sql = []
+
+    class DummyCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, sql, params=None):
+            executed_sql.append(sql)
+
+    with patch("django_saas_kit.schema.connections") as mock_conns, patch(
+        "django_saas_kit.schema.MigrationRecorder"
+    ) as mock_recorder:
+        conn = mock_conns.__getitem__.return_value
+        conn.vendor = "postgresql"
+        conn.ops.quote_name.side_effect = lambda s: f'"{s}"'
+        conn.cursor.return_value = DummyCursor()
+
+        _execute_set_search_path("default", "tenant_acme", ensure_migration_table=True)
+
+        assert executed_sql == [
+            'SET search_path TO "tenant_acme"',
+            'SET search_path TO "tenant_acme", public',
+        ]
+        mock_recorder.assert_called_once_with(conn)
+        mock_recorder.return_value.ensure_schema.assert_called_once()
+
+
+def test_list_schemas_returns_non_system_schemas():
+    with patch("django_saas_kit.schema.connections") as mock_conns:
+        cursor = mock_conns.__getitem__.return_value.cursor.return_value.__enter__.return_value
+        cursor.fetchall.return_value = [("tenant_a",), ("tenant_b",)]
+        assert list_schemas() == ["tenant_a", "tenant_b"]
 
 
 @pytest.mark.django_db(databases=["default", "public"])

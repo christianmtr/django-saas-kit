@@ -46,6 +46,24 @@ def test_configure_saas_databases_injects_search_path():
     assert "OPTIONS" not in base
 
 
+def test_configure_saas_databases_preserves_existing_options():
+    base = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "saas_db",
+        "OPTIONS": {"options": "-c statement_timeout=5000", "connect_timeout": 10},
+    }
+    dbs = configure_saas_databases(base, tenant_schema="tenant_acme")
+    assert (
+        dbs["default"]["OPTIONS"]["options"]
+        == "-c statement_timeout=5000 -c search_path=tenant_acme,public"
+    )
+    assert (
+        dbs["public"]["OPTIONS"]["options"]
+        == "-c statement_timeout=5000 -c search_path=public"
+    )
+    assert dbs["default"]["OPTIONS"]["connect_timeout"] == 10
+
+
 def test_configure_saas_databases_rejects_invalid_schema():
     base = {
         "ENGINE": "django.db.backends.postgresql",

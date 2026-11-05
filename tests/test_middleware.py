@@ -49,10 +49,9 @@ def test_middleware_blocks_suspended_tenant_with_403():
         assert res_json.status_code == 403
         assert b"suspended" in res_json.content.lower()
 
-        # Reactivate and clear cache
+        # Reactivate and save (should auto-clear status cache via model save)
         tenant.is_active = True
         tenant.save(using="public", update_fields=["is_active"])
-        clear_tenant_status_cache("tenant_unpaid")
 
         res_after = middleware(rf.get("/dashboard/"))
         assert res_after.status_code == 200
