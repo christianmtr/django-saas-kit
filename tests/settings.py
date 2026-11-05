@@ -11,6 +11,8 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django_saas_kit",
+    "tests.dummy_public",
+    "tests.dummy_tenant",
 ]
 
 DATABASES = {
