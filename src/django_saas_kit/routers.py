@@ -16,9 +16,14 @@ def set_active_migration_schema(schema_name: str | None) -> None:
     _migration_state.schema_name = schema_name
 
 
+def get_migration_schema_override() -> str | None:
+    """Return raw thread-local migration schema override (or None if unset)."""
+    return getattr(_migration_state, "schema_name", None)
+
+
 def get_active_migration_schema() -> str:
     """Return active migration schema override or fall back to SAAS_TENANT_SCHEMA."""
-    override = getattr(_migration_state, "schema_name", None)
+    override = get_migration_schema_override()
     return override if override is not None else saas_settings.TENANT_SCHEMA
 
 
